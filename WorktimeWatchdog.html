@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Worktime Watchdog 🐕</title>
+
+    <!--------------------------->
+    <!-- Make things pretty... -->
+    <!--------------------------->
+    <style>
+        .record:hover {
+            background-color: lightgrey;
+            cursor: pointer;
+        }
+    </style>
+
+    <!---------------------------->
+    <!-- Make things execute... -->
+    <!---------------------------->
+    <script>
+        const weekDays = ['Sun.', 'Mon.', 'Tue.', 'Wed.', 'Thu.', 'Fri.', 'Sat.'];
+
+        // Global state
+        let database;
+        let counterIntervalUpdaterId;
+        let dailyHoursWorked = 0;
+        let weeklyHoursWorked = 0;
+        let startTime = 0;
+        let stopTime = 0;
+
+        // Avoid showing notifications more than once. Using this approach they reappear when the page is re-opened/re-loaded
+        let eightHoursCompletedMessageShown = false;
+        let tenHoursApproachingWarningShown = false;
+        let fortyEightHoursApproachingWarningShown = false;
+
+        // --------------------------- INITIALIZE ---------------------------
+
+        // Initialize the notifications, the connection to the indexedDB as well as some user interface stuff
+        function initialize() {
+            // We have notifications to inform users about daily and weekly limits
+            if (Notification.permission === "granted") {
+                console.log("Notification permission granted");
+            } else if (Notification.permission !== "denied") {
+                Notification.requestPermission().then(permission => {
+                    console.log(permission);
+                });
+            }
+
+            // Initialize the indexedDB. And if we have a successful connection we also adapt the user interface accordingly
+            if (!window.indexedDB) {
+                alert("Worktime Watchdog needs IndexedDB support to work.");
+            } else {
+                let request = window.indexedDB.open("WorktimeWatchdog", 3);
+                request.onerror = function() {
+                    alert("Could not open IndexedDB!")
+                };
+                request.onupgradeneeded = function(event) {
+                    database = event.target.result;
+                    // We have two tables, one for time tracking entries and one for configuration
+                    // For time entries our key is the start time in milliseconds (e.g. 1610313352962)
+                    // We also store the yearWeek for easy week based retrieval and of course the end date
+                    let objectStore = database.createObjectStore("timeRecords", { keyPath: "start" });
+                    objectStore.createIndex("yearWeek", "yearWeek", { unique: false });
+                    objectStore.createIndex("end", "end", { unique: true });
+                    // Currently the configuration is only used to store an unfinished time record. I.e. the start part of an entry
+                    // This allows closing the browser and coming back later without losing any information
+                    let runConfigStore = database.createObjectStore("runConfig", { keyPath: "key" });
+                    runConfigStore.createIndex("value", "value", { unique: false });
+                };
+                request.onsuccess = async function (event) {
+                    database = event.target.result;
+                    // User Interface
+                    await calculateHoursWorkedFromDatabaseEntries();
+                    let isClockedIn = await getFromRunConfig("isClockedIn")
+                    if (isClockedIn) {
+                        startTime = await getFromRunConfig("startTime");
+                        counterIntervalUpdaterId = setInterval(updateCounters, 1000);
+                        gE("clockButton").style.backgroundColor = "lightcoral";
+                        gE("clockButton").style.color = "white";
+                        gE("clockButton").innerText = "Clock-out ⏱"
+                    }
+                    updateCounters();
+                };
+
+                setInterval(updateClock, 1000);
+            }
+
+            // User Interface
+            gE("csvImportButton").addEventListener("change", function () {
+                if (this.files && this.files[0]) {
+                    let myFile = this.files[0];
+                    let reader = new FileReader();
+
+                    reader.addEventListener('load', function (e) {
+                        importCSV(e.target.result);
+                    });
+
+                    reader.readAsBinaryString(myFile);
+                }
+            });
+        }
+
+        // --------------------------- CLOCK MANAGEMENT ---------------------------
+
+        // Update the clock display. This function is called by a timer in regular intervals
+        function updateClock() {
+            let currentDate = new Date();
+            gE("timeAndDate").innerHTML = currentDate.getDate() + "." + (currentDate.getMonth()+1) + "." + currentDate.getFullYear() +
+                " <b>" + currentDate.getDate() + ":" + getMinutesLZ(currentDate) + "</b>" + ":" + getSecondsLZ(currentDate);
+        }
+
+
+        // Update the daily and weekly counters and also show notifications if the user goes beyond the limits
+        // This happens based on predefined intervals
+        function updateCounters() {
+            if (startTime === 0) {
+                gE("dailyHoursWorked").innerText = dailyHoursWorked.toFixed(2) + " hours";
+                gE("remainingDailyHours").innerText = (8 - dailyHoursWorked).toFixed(2) + " hours";
+                gE("weeklyHoursWorked").innerText = (weeklyHoursWorked).toFixed(2) + " hours";
+                gE("remainingWeeklyHours").innerText = (40 - weeklyHoursWorked).toFixed(2) + " hours";
+            } else {
+                gE("dailyHoursWorked").innerText = (dailyHoursWorked + (((new Date).getTime()-startTime)/1000/60/60)).toFixed(2) + " hours";
+                gE("remainingDailyHours").innerText = (8 - dailyHoursWorked - (((new Date).getTime()-startTime)/1000/60/60)).toFixed(2) + " hours";
+                gE("weeklyHoursWorked").innerText = (weeklyHoursWorked + (((new Date).getTime()-startTime)/1000/60/60)).toFixed(2) + " hours";
+                gE("remainingWeeklyHours").innerText = (40 - weeklyHoursWorked - (((new Date).getTime()-startTime)/1000/60/60)).toFixed(2) + " hours";
+            }
+
+            if (!fortyEightHoursApproachingWarningShown && parseFloat(gE("weeklyHoursWorked").innerText) >= 47.5) {
+                showNotification("⚠ You are approaching the legal limit of 48 hours per week. Finish your work now! ⚠");
+                fortyEightHoursApproachingWarningShown = true;
+            } else if (!tenHoursApproachingWarningShown && parseFloat(gE("dailyHoursWorked").innerText) >= 9.5) {
+                showNotification("⚠ You are approaching the legal limit of 10 hours per day. Finish your work now! ⚠");
+                tenHoursApproachingWarningShown = true;
+            } else if (!eightHoursCompletedMessageShown && parseFloat(gE("dailyHoursWorked").innerText) >= 8) {
+                showNotification("You have worked eight hours today. Time to stop for today! 😀");
+                eightHoursCompletedMessageShown = true;
+            }
+        }
+
+
+        // The function behind the clock-in/clock-out button. Toggles between calling the clockIn() and clockOut()
+        // function based on whether we are currently tracking time (i.e. startTime is defined)
+        function clockButton() {
+            if (startTime === 0) {
+                clockIn();
+                counterIntervalUpdaterId = setInterval(updateCounters, 1000);
+            } else {
+                clearInterval(counterIntervalUpdaterId);
+                clockOut();
+            }
+        }
+
+
+        // Clocking-in is basically changing the button color and saving the start time and a status flag
+        function clockIn() {
+            gE("clockButton").style.backgroundColor = "lightcoral";
+            gE("clockButton").style.color = "white";
+            gE("clockButton").innerText = "Clock-out ⏱"
+            startTime = new Date().getTime();
+            saveToRunConfig("isClockedIn", true);
+            saveToRunConfig("startTime", startTime);
+        }
+
+
+        // Clocking-out is resetting the status flag and the start timestamp. It also changes the button color (yeah!)
+        async function clockOut() {
+            await saveToRunConfig("isClockedIn", false);
+            await saveToRunConfig("startTime", null);
+
+            gE("clockButton").style.backgroundColor = "lightgreen";
+            gE("clockButton").style.color = "black";
+            gE("clockButton").innerText = "Clock-in ⏱";
+            stopTime = new Date().getTime();
+
+            let transaction = database.transaction(["timeRecords"], "readwrite");
+            transaction.onerror = function (event) {
+                alert("An error occurred: " + transaction.error);
+            };
+
+            let timeRecord = {
+                yearWeek: new Date(startTime).getFullYear() + "-" + new Date(startTime).getWeekNumber(),
+                start: startTime,
+                end: stopTime
+            };
+
+            let timeRecords = transaction.objectStore("timeRecords");
+            let request = timeRecords.add(timeRecord);
+            request.onsuccess = async function (event) {
+                startTime = 0;
+                stopTime = 0;
+                await calculateHoursWorkedFromDatabaseEntries();
+            };
+            request.onerror = function (event) {
+                alert("Error while saving time record");
+            }
+        }
+
+
+        // Calculates the hours worked (for the day and for the week) based on entries found in the database for the current year and week
+        function calculateHoursWorkedFromDatabaseEntries() {
+            dailyHoursWorked = 0;
+            let year = new Date().getFullYear();
+            let week = new Date().getWeekNumber();
+
+            return new Promise(function (resolve, reject) {
+                let transaction = database.transaction(["timeRecords"]);
+                let objectStore = transaction.objectStore("timeRecords");
+                let index = objectStore.index("yearWeek");
+                index.openCursor(IDBKeyRange.only(year + "-" + week)).onsuccess = function(event) {
+                    let cursor = event.target.result;
+                    if (cursor) {
+                        weeklyHoursWorked += (cursor.value.end - cursor.value.start)/1000/60/60;
+                        if (new Date(cursor.value.start).getDay() === (new Date().getDay())) {
+                            dailyHoursWorked += (cursor.value.end - cursor.value.start)/1000/60/60;
+                        }
+                        cursor.continue();
+                    } else {
+                        resolve();
+                    }
+                };
+            });
+        }
+
+        // --------------------------- TIME RECORD MANAGEMENT ---------------------------
+
+        // Show time records / entries from the database in the order they are stored in the database
+        // Normally you are only interested int the current week. But for backups and or for archiving you might want all...
+        function displayTimeRecords(currentWeekOnly) {
+            let range = undefined;
+            if (currentWeekOnly) {
+                let year = new Date().getFullYear();
+                let week = new Date().getWeekNumber();
+                range = IDBKeyRange.only(year + "-" + week);
+            }
+
+            return new Promise(function (resolve, reject) {
+                let transaction = database.transaction(["timeRecords"]);
+                let objectStore = transaction.objectStore("timeRecords");
+                let index = objectStore.index("yearWeek")
+                gE("timeRecords").innerHTML = "";
+                index.openCursor(range).onsuccess = function(event) {
+                    let cursor = event.target.result;
+                    if (cursor) {
+                        let dateString = "";
+                        if (!currentWeekOnly) {
+                            dateString = new Date(cursor.value.start).getDate() + "." + new Date(cursor.value.start).getMonth() +  "." + new Date(cursor.value.start).getFullYear() + " - ";
+                        }
+
+                        gE("timeRecords").innerHTML = gE("timeRecords").innerHTML +
+                            "<span>" +
+                                dateString + getDayOfWeek(new Date(cursor.value.start)) + " " +
+                                new Date(cursor.value.start).getHours() + ":" + getMinutesLZ(new Date(cursor.value.start))  + "  -  " +
+                                new Date(cursor.value.end).getHours() + ":" + getMinutesLZ(new Date(cursor.value.end)) + " " +
+                                "<span class='record' onclick='deleteEntry(\"" + cursor.value.start + "\")'>[Remove]</span>" +
+                            "</span><br>";
+                        cursor.continue();
+                    } else {
+                        resolve();
+                    }
+                };
+            });
+        }
+
+
+        // Store a key/value entry to the runConfig table.
+        // Currently only used to store/read a start time and let users close the browser.
+        function saveToRunConfig(key, value) {
+            let transaction = database.transaction(["runConfig"], "readwrite");
+            transaction.onerror = function (event) {
+                alert("An error occurred: " + transaction.error);
+            };
+
+            const clockInRunConfig = {key: key, value: value};
+            let runConfig = transaction.objectStore("runConfig");
+            let request = runConfig.put(clockInRunConfig);
+            request.onerror = function (event) {
+                alert("Error while adding key [" + key + "] value [" + value + "] to the runConfig table");
+            }
+        }
+
+
+        // Retrieve a value by its key from the runConfig table.
+        // Currently only used to store/read a start time and let users close the browser.
+        function getFromRunConfig(key) {
+            return new Promise(function (resolve, reject) {
+                let transaction = database.transaction(["runConfig"]);
+                let objectStore = transaction.objectStore("runConfig");
+                let request = objectStore.get(key);
+                request.onerror = function (event) {
+                    alert("Error while retrieving [" + key + "] from runConfig")
+                };
+                request.onsuccess = function (event) {
+                    if (event.target.result === undefined) {
+                        resolve(null);
+                    } else {
+                        resolve(event.target.result.value);
+                    }
+                };
+            });
+        }
+
+
+        // Whenever you clock-out, a new entry gets added to the timeRecords table
+        // This is the function which does this. Also the CSV import is using this function
+        function addEntry(yearWeek, start, end) {
+            let transaction = database.transaction(["timeRecords"], "readwrite");
+            transaction.onerror = function (event) {
+                alert("An error occurred: " + transaction.error);
+            };
+
+            let timeRecord = {
+                yearWeek: yearWeek,
+                start: parseInt(start),
+                end: parseInt(end)
+            };
+
+            let timeRecords = transaction.objectStore("timeRecords");
+            let request = timeRecords.add(timeRecord);
+            request.onsuccess = async function (event) {
+                startTime = 0;
+                stopTime = 0;
+                await calculateHoursWorkedFromDatabaseEntries();
+                await calculateWeeklyHoursFromDatabaseEntries();
+            };
+            request.onerror = function (event) {
+                alert("Error while saving record");
+            }
+        }
+
+
+        // If the user enters a start and end date through the manual entry page then this function is called
+        // Its nothing fancy but it does the trick. And anyway people should only add manual entries rarely...
+        function addEntryFromUserInterface() {
+            let manualStart = new Date();
+            let manualEnd = new Date();
+
+            manualStart.setFullYear(parseInt(gE("manualStartYear").value),(parseInt(gE("manualStartMonth").value)-1),parseInt(gE("manualStartDay").value));
+            manualStart.setHours(parseInt(gE("manualStartHour").value));
+            manualStart.setMinutes(parseInt(gE("manualStartMinute").value));
+            manualStart.setSeconds(0);
+            manualEnd.setFullYear(parseInt(gE("manualEndYear").value),(parseInt(gE("manualEndMonth").value)-1),parseInt(gE("manualEndDay").value));
+            manualEnd.setHours(parseInt(gE("manualEndHour").value));
+            manualEnd.setMinutes(parseInt(gE("manualEndMinute").value));
+            manualEnd.setSeconds(0);
+
+            let manualYearWeek = manualStart.getFullYear() + "-" + manualEnd.getWeekNumber();
+            let transaction = database.transaction(["timeRecords"], "readwrite");
+            transaction.onerror = function () {
+                alert("An error occurred: " + transaction.error);
+            };
+
+            let timeRecord = {
+                yearWeek: manualYearWeek,
+                start: manualStart.getTime(),
+                end: manualEnd.getTime()
+            };
+
+            let timeRecords = transaction.objectStore("timeRecords");
+            let request = timeRecords.add(timeRecord);
+            request.onsuccess = async function (event) {
+                location.reload();
+            };
+            request.onerror = function (event) {
+                alert("error while saving record");
+            }
+        }
+
+
+        // Deletes an entry via its key (start date in milliseconds) and reloads the application after successful deletion
+        function deleteEntry(start) {
+            let transaction = database.transaction(["timeRecords"], "readwrite");
+            transaction.onerror = function () {
+                alert("An error occurred: " + transaction.error);
+            };
+            let timeRecords = transaction.objectStore("timeRecords");
+            let request = timeRecords.delete(parseInt(start));
+            request.onsuccess = async function (event) {
+                location.reload();
+            };
+            request.onerror = function (event) {
+                alert("error while removing record");
+            }
+        }
+
+
+        // Show the manual entry part of the application and initialize the input mask with the current date
+        function showAddManualEntryScreen() {
+            let currentDate = new Date();
+            gE("manualEndYear").value = gE("manualStartYear").value = currentDate.getFullYear();
+            gE("manualEndMonth").value = gE("manualStartMonth").value = currentDate.getMonth()+1;
+            gE("manualEndDay").value = gE("manualStartDay").value = currentDate.getDate();
+            gE("manualEndHour").value = gE("manualStartHour").value = currentDate.getHours();
+            gE("manualEndMinute").value =  gE("manualStartMinute").value = getMinutesLZ(currentDate);
+            gE("addManualEntryScreen").style.display = 'block';
+            gE("defaultScreen").style.display = 'none';
+        }
+
+        // --------------------------- IMPORT/EXPORT ---------------------------
+
+        // Export all entries into a CSV file
+        function exportIDB() {
+            let sequence = new Promise(function (resolve, reject) {
+                let csvData = "yearWeek;start;end\n";
+                let transaction = database.transaction(["timeRecords"]);
+                let objectStore = transaction.objectStore("timeRecords");
+                let index = objectStore.index("yearWeek")
+
+                index.openCursor().onsuccess = function (event) {
+                    let cursor = event.target.result;
+                    if (cursor) {
+                        csvData += cursor.value.yearWeek + ";" + cursor.value.start + ";" + cursor.value.end + "\n"
+                        cursor.continue();
+                    } else {
+                        resolve(csvData);
+                    }
+                };
+            });
+
+            sequence.then(function(output) {
+                let dataBlob = new Blob([output], {type: 'text/plain'});
+                let anchorElement = window.document.createElement('a');
+                anchorElement.href = window.URL.createObjectURL(dataBlob);
+                anchorElement.download = "worktimeWatchdogBackup.txt";
+                document.body.appendChild(anchorElement);
+                anchorElement.click();
+                document.body.removeChild(anchorElement);
+            });
+        }
+
+
+        // Import Backup file. This will overwrite all existing entries but will also warn you beforehand
+        function importCSV(test) {
+            if (test !== undefined) {
+                let r = confirm("Importing data will overwrite all existing data! Do you want to continue?");
+                if (r === true) {
+                    // open a read/write db transaction, ready for clearing the data
+                    let transaction = database.transaction(["timeRecords"], "readwrite");
+
+                    // report on the success of the transaction completing, when everything is done
+                    transaction.oncomplete = function(event) {
+                        alert("Import Completed");
+                    };
+
+                    transaction.onerror = function(event) {
+                        alert("Import Failed. Reason: [" + transaction.error + "]");
+                    };
+
+                    // create an object store on the transaction
+                    let objectStore = transaction.objectStore("timeRecords");
+
+                    // Make a request to clear all the data out of the object store
+                    let objectStoreRequest = objectStore.clear();
+
+                    let lines = test.split("\n");
+                    // skip header, start with 1
+                    for (i=1; i<lines.length; i++) {
+                        addEntry(lines[i].split(";")[0], lines[i].split(";")[1], lines[i].split(";")[2])
+                    }
+                }
+            }
+        }
+
+        // --------------------------- UTILS ---------------------------
+
+        // Get the minutes of a date but add leading zeros if below 9
+        function getMinutesLZ(date) {
+            return date.getMinutes() <= 9 ? "0" + date.getMinutes() : date.getMinutes();
+        }
+
+        // Get the seconds of a date but add leading zeros if below 9
+        function getSecondsLZ(date) {
+            return date.getSeconds() <= 9 ? "0" + date.getSeconds() : date.getSeconds();
+        }
+
+        // Get the day of the week (E.g. Mon. or Wed.)
+        function getDayOfWeek(date) {
+            return weekDays[new Date(date).getDay()]
+        }
+
+        // I did not come up with the logic to determine the current week number. But there is always SO...
+        //https://stackoverflow.com/questions/6117814/get-week-of-year-in-javascript-like-in-php
+        //https://stackoverflow.com/a/6117889
+        Date.prototype.getWeekNumber = function(){
+            let d = new Date(Date.UTC(this.getFullYear(), this.getMonth(), this.getDate()));
+            let dayNum = d.getUTCDay() || 7;
+            d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+            let yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1));
+            return Math.ceil((((d - yearStart) / 86400000) + 1)/7)
+        };
+
+        // Show a notification in the operating system
+        function showNotification(message) {
+            const notification = new Notification("Worktime Watchdog 🐕", {
+                body: message
+            });
+        }
+
+        // getElementById but shorter...
+        function gE(elementId) {
+            return document.getElementById(elementId);
+        }
+    </script>
+</head>
+
+<!--------------------------->
+<!-- Make things appear... -->
+<!--------------------------->
+<body onload="initialize()">
+    <div id="defaultScreen">
+        <b>Worktime Watchdog</b>
+        <span title="Add a manual entry" id="addManualEntry" onclick="showAddManualEntryScreen()" style="cursor: pointer">➕</span>
+        <span title="Export all entries ever recorded" id="exportButton" onclick="exportIDB()" style="cursor: pointer">💾</span>
+        <label style="cursor: pointer" title="Import entries from a previous export"><input id="csvImportButton" type='file' accept='text/plain' onchange='importCSV()' style="display: none;">📁</label>
+        <span title="Display all entries ever recorded" id="displayAll" onclick="displayTimeRecords(false)" style="cursor: pointer">📼</span>
+        <br><br>
+
+        <span>Current time: </span><span id="timeAndDate">-</span><br><br>
+        <span>Remaining Daily: </span><span id="remainingDailyHours">0</span><br>
+        <span>Daily hours: </span><span id="dailyHoursWorked">0</span><br><br>
+        <span>Weekly hours: </span><span id="weeklyHoursWorked">0</span><br>
+        <span>Remaining Weekly: </span><span id="remainingWeeklyHours">0</span><br><br>
+        <div>
+            <div title="Clock in and forget. You can close the window and come back when you want to clock-out, but you won't get notifications in that case!" id="clockButton" onclick="clockButton()"
+                 style="background-color: lightgreen; color:black; padding: 10px; width: 100px; float:left; cursor: pointer">Clock-in ⏱</div>
+            <div title="Show this week's entries" id="weekEntriesButton" onclick="displayTimeRecords(true)"
+                 style="background-color: lightgray; color:black; padding: 10px; margin-left:5px; width: 120px; float:left; cursor: pointer">Week Entries 📅</div>
+        </div>
+        <div id="timeRecords" style="clear: both; margin-top:50px"></div>
+
+    </div>
+    <div id="addManualEntryScreen" style="display:none">
+        <b>Worktime Watchdog</b><br><br>
+        <i>Add a manual entry (Day.Month.Year Hour:Minute)</i>
+        <br><br>
+        <label>
+            Start:
+            <input type="text" id="manualStartDay" style="width:20px">.
+            <input type="text" id="manualStartMonth" style="width:20px">.
+            <input type="text" id="manualStartYear" style="width:40px">&nbsp;&nbsp;&nbsp;
+            <input type="text" id="manualStartHour" style="width:20px">:
+            <input type="text" id="manualStartMinute" style="width:20px">
+        </label>
+        <br><br>
+        <label>
+            End:&nbsp;
+            <input type="text" id="manualEndDay" style="width:20px">.
+            <input type="text" id="manualEndMonth" style="width:20px">.
+            <input type="text" id="manualEndYear" style="width:40px">&nbsp;&nbsp;&nbsp;
+            <input type="text" id="manualEndHour" style="width:20px">:
+            <input type="text" id="manualEndMinute" style="width:20px">
+        </label>
+        <br><br>
+        <div id="addEntry" onclick="addEntryFromUserInterface()" style="background-color: lightgrey; padding: 10px; width: 100px; float:left; margin-left:5px; display:block;cursor: pointer">Add Entry</div>
+        <div id="backButton" onclick="location.reload()" style="background-color: lightgrey; padding: 10px; width: 100px; float: left; margin-left:5px;cursor: pointer">Back</div>
+    </div>
+</body>
+</html>
