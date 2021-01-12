@@ -106,7 +106,7 @@
         function updateClock() {
             let currentDate = new Date();
             gE("timeAndDate").innerHTML = currentDate.getDate() + "." + (currentDate.getMonth()+1) + "." + currentDate.getFullYear() +
-                " <b>" + currentDate.getDate() + ":" + getMinutesLZ(currentDate) + "</b>" + ":" + getSecondsLZ(currentDate);
+                " <b>" + currentDate.getHours() + ":" + getMinutesLZ(currentDate) + "</b>" + ":" + getSecondsLZ(currentDate);
         }
 
 
