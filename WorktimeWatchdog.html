@@ -199,6 +199,7 @@
         // Calculates the hours worked (for the day and for the week) based on entries found in the database for the current year and week
         function calculateHoursWorkedFromDatabaseEntries() {
             dailyHoursWorked = 0;
+            weeklyHoursWorked = 0;
             let year = new Date().getFullYear();
             let week = new Date().getWeekNumber();
 
@@ -243,7 +244,7 @@
                     if (cursor) {
                         let dateString = "";
                         if (!currentWeekOnly) {
-                            dateString = new Date(cursor.value.start).getDate() + "." + new Date(cursor.value.start).getMonth() +  "." + new Date(cursor.value.start).getFullYear() + " - ";
+                            dateString = new Date(cursor.value.start).getDate() + "." + (new Date(cursor.value.start).getMonth() + 1) +  "." + new Date(cursor.value.start).getFullYear() + " - ";
                         }
 
                         gE("timeRecords").innerHTML = gE("timeRecords").innerHTML +
