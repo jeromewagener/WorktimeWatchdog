@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Worktime Watchdog 🐕</title>
+    <title>WorktimeWatchdog 🐕</title>
 
     <!--------------------------->
     <!-- Make things pretty... -->
@@ -515,7 +515,7 @@
 <!--------------------------->
 <body onload="initialize()">
 <div id="defaultScreen">
-    <h1>Worktime Watchdog 🐕</h1>
+    <h1>WorktimeWatchdog 🐕</h1>
     <span>Current time: </span><span id="timeAndDate">-</span><br><br>
     <span>Remaining Daily: </span><span id="remainingDailyHours">0</span><br>
     <span>Daily hours: </span><span id="dailyHoursWorked">0</span><br><br>
@@ -523,14 +523,14 @@
     <span>Remaining Weekly: </span><span id="remainingWeeklyHours">0</span><br><br>
     <br>
 
-    <span title="Add a manual entry" id="addManualEntry" onclick="showAddManualEntryScreen()" class="button">Manually ➕</span>
+    <span title="Add a manual entry" id="addManualEntry" onclick="showAddManualEntryScreen()" class="button">Manual ➕</span>
     <span title="Export all entries ever recorded" id="exportButton" onclick="exportIDB()" class="button">Export 💾</span>
     <label>
         <span title="Import entries from a previous export" class="button">Import 📁</span>
         <input id="csvImportButton" type='file' accept='text/plain' onchange='importCSV()' style="display: none;">
     </label>
     <br><br><br>
-    <span title="Show all ever recorded entries" id="allEntriesButton" onclick="displayTimeRecords(false)" class="button">Show All 📜</span>
+    <span title="Show all ever recorded entries" id="allEntriesButton" onclick="displayTimeRecords(false)" class="button">All 📜</span>
     <span title="Show this week's entries" id="weekEntriesButton" onclick="displayTimeRecords(true)" class="button">Week 📅</span>
     <span title="Clock in and forget. You can close the window and come back when you want to clock-out, but you won't get notifications in that case!" id="clockButton" onclick="clockButton()"
           style="background-color: lightgreen; color:black; padding: 15px; cursor: pointer">Clock-in ⌛</span>
@@ -538,7 +538,7 @@
 
 </div>
 <div id="addManualEntryScreen" style="display:none">
-    <h1>Worktime Watchdog 🐕</h1>
+    <h1>WorktimeWatchdog 🐕</h1>
     <i>Add a manual entry (Day.Month.Year Hour:Minute)</i><br><br>
     <label>
         Start:
