@@ -13,6 +13,12 @@
             background-color: lightgrey;
             cursor: pointer;
         }
+        .button {
+            background-color: lightgray;
+            color:black;
+            padding: 15px;
+            cursor: pointer;
+        }
     </style>
 
     <!---------------------------->
@@ -107,7 +113,7 @@
         function updateClock() {
             let currentDate = new Date();
             gE("timeAndDate").innerHTML = currentDate.getDate() + "." + (currentDate.getMonth()+1) + "." + currentDate.getFullYear() +
-                " <b>" + currentDate.getHours() + ":" + getMinutesLZ(currentDate) + "</b>" + ":" + getSecondsLZ(currentDate);
+                " <b>" + currentDate.getHours() + ":" + getMinutesLZ(currentDate) + ":" + getSecondsLZ(currentDate) + "</b>";
         }
 
 
@@ -133,7 +139,7 @@
                 showNotification("⚠ You are approaching the legal limit of 10 hours per day. Finish your work now! ⚠");
                 tenHoursApproachingWarningShown = true;
             } else if (!eightHoursCompletedMessageShown && parseFloat(gE("dailyHoursWorked").innerText) >= 8) {
-                showNotification("You have worked eight hours today. Time to stop for today! 😀");
+                showNotification("You have worked eight hours today. Time to stop? 😀");
                 eightHoursCompletedMessageShown = true;
             }
         }
@@ -156,7 +162,7 @@
         function clockIn() {
             gE("clockButton").style.backgroundColor = "lightcoral";
             gE("clockButton").style.color = "white";
-            gE("clockButton").innerText = "Clock-out ⏱"
+            gE("clockButton").innerText = "Clock-out ⏳"
             startTime = new Date().getTime();
             saveToRunConfig("isClockedIn", true);
             saveToRunConfig("startTime", startTime);
@@ -170,7 +176,7 @@
 
             gE("clockButton").style.backgroundColor = "lightgreen";
             gE("clockButton").style.color = "black";
-            gE("clockButton").innerText = "Clock-in ⏱";
+            gE("clockButton").innerText = "Clock-in ⌛";
             stopTime = new Date().getTime();
 
             let transaction = database.transaction(["timeRecords"], "readwrite");
@@ -250,10 +256,10 @@
 
                         gE("timeRecords").innerHTML = gE("timeRecords").innerHTML +
                             "<span>" +
-                                dateString + getDayOfWeek(new Date(cursor.value.start)) + " " +
-                                new Date(cursor.value.start).getHours() + ":" + getMinutesLZ(new Date(cursor.value.start))  + "  -  " +
-                                new Date(cursor.value.end).getHours() + ":" + getMinutesLZ(new Date(cursor.value.end)) + " " +
-                                "<span class='record' onclick='deleteEntry(\"" + cursor.value.start + "\")'>[Remove]</span>" +
+                            dateString + getDayOfWeek(new Date(cursor.value.start)) + " " +
+                            new Date(cursor.value.start).getHours() + ":" + getMinutesLZ(new Date(cursor.value.start))  + "  -  " +
+                            new Date(cursor.value.end).getHours() + ":" + getMinutesLZ(new Date(cursor.value.end)) + " " +
+                            "<span class='record' onclick='deleteEntry(\"" + cursor.value.start + "\")'>[Remove]</span>" +
                             "</span><br>";
                         cursor.continue();
                     } else {
@@ -508,52 +514,52 @@
 <!-- Make things appear... -->
 <!--------------------------->
 <body onload="initialize()">
-    <div id="defaultScreen">
-        <b>Worktime Watchdog</b>
-        <span title="Add a manual entry" id="addManualEntry" onclick="showAddManualEntryScreen()" style="cursor: pointer">➕</span>
-        <span title="Export all entries ever recorded" id="exportButton" onclick="exportIDB()" style="cursor: pointer">💾</span>
-        <label style="cursor: pointer" title="Import entries from a previous export"><input id="csvImportButton" type='file' accept='text/plain' onchange='importCSV()' style="display: none;">📁</label>
-        <span title="Display all entries ever recorded" id="displayAll" onclick="displayTimeRecords(false)" style="cursor: pointer">📼</span>
-        <br><br>
+<div id="defaultScreen">
+    <h1>Worktime Watchdog 🐕</h1>
+    <span>Current time: </span><span id="timeAndDate">-</span><br><br>
+    <span>Remaining Daily: </span><span id="remainingDailyHours">0</span><br>
+    <span>Daily hours: </span><span id="dailyHoursWorked">0</span><br><br>
+    <span>Weekly hours: </span><span id="weeklyHoursWorked">0</span><br>
+    <span>Remaining Weekly: </span><span id="remainingWeeklyHours">0</span><br><br>
+    <br>
 
-        <span>Current time: </span><span id="timeAndDate">-</span><br><br>
-        <span>Remaining Daily: </span><span id="remainingDailyHours">0</span><br>
-        <span>Daily hours: </span><span id="dailyHoursWorked">0</span><br><br>
-        <span>Weekly hours: </span><span id="weeklyHoursWorked">0</span><br>
-        <span>Remaining Weekly: </span><span id="remainingWeeklyHours">0</span><br><br>
-        <div>
-            <div title="Clock in and forget. You can close the window and come back when you want to clock-out, but you won't get notifications in that case!" id="clockButton" onclick="clockButton()"
-                 style="background-color: lightgreen; color:black; padding: 10px; width: 100px; float:left; cursor: pointer">Clock-in ⏱</div>
-            <div title="Show this week's entries" id="weekEntriesButton" onclick="displayTimeRecords(true)"
-                 style="background-color: lightgray; color:black; padding: 10px; margin-left:5px; width: 120px; float:left; cursor: pointer">Week Entries 📅</div>
-        </div>
-        <div id="timeRecords" style="clear: both; margin-top:50px"></div>
+    <span title="Add a manual entry" id="addManualEntry" onclick="showAddManualEntryScreen()" class="button">Add manually ➕</span>
+    <span title="Export all entries ever recorded" id="exportButton" onclick="exportIDB()" class="button">Export all 💾</span>
+    <label>
+        <span title="Import entries from a previous export" class="button">Import 📁</span>
+        <input id="csvImportButton" type='file' accept='text/plain' onchange='importCSV()' style="display: none;">
+    </label>
+    <br><br><br>
+    <span title="Show this week's entries" id="allEntriesButton" onclick="displayTimeRecords(false)" class="button">All Entries 📜</span>
+    <span title="Show this week's entries" id="weekEntriesButton" onclick="displayTimeRecords(true)" class="button">Week Entries 📅</span>
+    <span title="Clock in and forget. You can close the window and come back when you want to clock-out, but you won't get notifications in that case!" id="clockButton" onclick="clockButton()"
+          style="background-color: lightgreen; color:black; padding: 15px; cursor: pointer">Clock-in ⌛</span>
+    <div id="timeRecords" style="clear: both; margin-top:50px"></div>
 
-    </div>
-    <div id="addManualEntryScreen" style="display:none">
-        <b>Worktime Watchdog</b><br><br>
-        <i>Add a manual entry (Day.Month.Year Hour:Minute)</i>
-        <br><br>
-        <label>
-            Start:
-            <input type="text" id="manualStartDay" style="width:20px">.
-            <input type="text" id="manualStartMonth" style="width:20px">.
-            <input type="text" id="manualStartYear" style="width:40px">&nbsp;&nbsp;&nbsp;
-            <input type="text" id="manualStartHour" style="width:20px">:
-            <input type="text" id="manualStartMinute" style="width:20px">
-        </label>
-        <br><br>
-        <label>
-            End:&nbsp;
-            <input type="text" id="manualEndDay" style="width:20px">.
-            <input type="text" id="manualEndMonth" style="width:20px">.
-            <input type="text" id="manualEndYear" style="width:40px">&nbsp;&nbsp;&nbsp;
-            <input type="text" id="manualEndHour" style="width:20px">:
-            <input type="text" id="manualEndMinute" style="width:20px">
-        </label>
-        <br><br>
-        <div id="addEntry" onclick="addEntryFromUserInterface()" style="background-color: lightgrey; padding: 10px; width: 100px; float:left; margin-left:5px; display:block;cursor: pointer">Add Entry</div>
-        <div id="backButton" onclick="location.reload()" style="background-color: lightgrey; padding: 10px; width: 100px; float: left; margin-left:5px;cursor: pointer">Back</div>
-    </div>
+</div>
+<div id="addManualEntryScreen" style="display:none">
+    <h1>Worktime Watchdog 🐕</h1>
+    <i>Add a manual entry (Day.Month.Year Hour:Minute)</i><br><br>
+    <label>
+        Start:
+        <input type="text" id="manualStartDay" style="width:20px">.
+        <input type="text" id="manualStartMonth" style="width:20px">.
+        <input type="text" id="manualStartYear" style="width:40px">&nbsp;&nbsp;&nbsp;
+        <input type="text" id="manualStartHour" style="width:20px">:
+        <input type="text" id="manualStartMinute" style="width:20px">
+    </label>
+    <br><br>
+    <label>
+        End:&nbsp;
+        <input type="text" id="manualEndDay" style="width:20px">.
+        <input type="text" id="manualEndMonth" style="width:20px">.
+        <input type="text" id="manualEndYear" style="width:40px">&nbsp;&nbsp;&nbsp;
+        <input type="text" id="manualEndHour" style="width:20px">:
+        <input type="text" id="manualEndMinute" style="width:20px">
+    </label>
+    <br><br><br>
+    <span id="addEntry" onclick="addEntryFromUserInterface()" class="button">Add Entry ➕</span>
+    <span id="backButton" onclick="location.reload()" class="button">Back 👈</span>
+</div>
 </body>
 </html>
